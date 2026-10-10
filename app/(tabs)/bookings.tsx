@@ -7,6 +7,7 @@ import { Tabs } from '@/src/components/ui/Tabs';
 import { EmptyState, PageHeader } from '@/src/components/ui/Misc';
 import { BookingCard } from '@/src/components/BookingCard';
 import { Spacing } from '@/src/theme';
+import { DataBanner } from '@/src/components/DataBanner';
 import { useData } from '@/src/context/DataContext';
 import { useIsOwner } from '@/src/context/AuthContext';
 import type { BookingStatus } from '@/src/types';
@@ -24,7 +25,7 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 export default function BookingsScreen() {
   const params = useLocalSearchParams<{ filter?: Filter }>();
-  const { bookings } = useData();
+  const { bookings, refresh, refreshing } = useData();
   const isOwner = useIsOwner();
   const [filter, setFilter] = useState<Filter>(params.filter ?? 'all');
 
@@ -45,6 +46,7 @@ export default function BookingsScreen() {
       footer={<Button title="Yangi bron" icon="add" onPress={() => router.push('/booking/new')} />}
     >
       <PageHeader title="Bronlar" />
+      <DataBanner />
       <Tabs
         items={FILTERS.map((f) => ({
           ...f,
@@ -64,6 +66,8 @@ export default function BookingsScreen() {
         ListEmptyComponent={
           <EmptyState icon="document-text-outline" title="Bronlar topilmadi" hint="Boshqa filtrni tanlang yoki yangi bron qo'shing." />
         }
+        refreshing={refreshing}
+        onRefresh={() => void refresh()}
         initialNumToRender={8}
         windowSize={7}
       />

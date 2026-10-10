@@ -1,4 +1,4 @@
-import type { BookingStatus, EventType } from '../types';
+import type { BookingStatus, EventType, PayKind, PayMethod, PayType, SessionCode } from '../types';
 
 export const MONTHS = [
   'Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun',
@@ -121,6 +121,11 @@ export function formatDateTime(isoDateTime: string): string {
   return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}, ${hh}:${mm}`;
 }
 
+export function isWeekendISO(iso: string): boolean {
+  const d = parseISODate(iso).getDay();
+  return d === 0 || d === 6;
+}
+
 export function isValidISODate(s: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
   const d = parseISODate(s);
@@ -141,10 +146,41 @@ export const STATUS_LABEL: Record<BookingStatus, string> = {
   cancelled: 'Bekor qilingan',
 };
 
+/** Tadbir turlari — server (lib/sessions.ts) bilan bir xil nomlar */
 export const EVENT_LABEL: Record<EventType, string> = {
-  toy: "To'y",
-  nikoh: 'Nikoh',
+  nahorgi_osh: 'Nahorgi osh',
+  nikoh: 'Nikoh to\'yi',
+  kunduzgi: 'Kunduzgi to\'y',
+  kechki: 'Kechki to\'y',
+  tadbir: 'Maxsus tadbir',
+};
+
+export const SESSION_LABEL: Record<SessionCode, string> = {
+  morning: 'Nahorgi osh',
+  day: 'Nikoh to\'yi',
+  evening: 'Kunduzgi / Vecher',
+  special: 'Maxsus tadbir',
+};
+
+export const PAY_METHOD_LABEL: Record<PayMethod, string> = {
+  cash: 'Naqd',
+  card: 'Karta',
+  transfer: 'Hisob raqamiga',
+  click: 'Click',
+  payme: 'Payme',
   other: 'Boshqa',
+};
+
+export const PAY_KIND_LABEL: Record<PayKind, string> = {
+  deposit: 'Zakalat',
+  payment: 'To\'lov',
+  refund: 'Qaytarish',
+};
+
+export const PAY_TYPE_LABEL: Record<PayType, string> = {
+  daily: 'Kunlik',
+  monthly: 'Oylik',
+  per_event: 'Tadbir boshiga',
 };
 
 export function pluralGuests(n: number): string {

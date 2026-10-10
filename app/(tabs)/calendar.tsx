@@ -8,6 +8,7 @@ import { Button } from '@/src/components/ui/Button';
 import { EmptyState, IconCircle, PageHeader, SectionTitle } from '@/src/components/ui/Misc';
 import { StatusBadge } from '@/src/components/ui/Badge';
 import { Colors, HIT_SLOP, Spacing } from '@/src/theme';
+import { DataBanner } from '@/src/components/DataBanner';
 import { useData } from '@/src/context/DataContext';
 import type { Booking } from '@/src/types';
 import {
@@ -95,6 +96,7 @@ export default function CalendarScreen() {
           </Pressable>
         }
       />
+      <DataBanner />
 
       <Card>
         <View style={styles.monthNav}>

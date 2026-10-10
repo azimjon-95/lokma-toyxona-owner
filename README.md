@@ -14,11 +14,27 @@ npm run check           # TypeScript + ESLint
 npx expo-doctor         # bog'liqliklar mosligi
 ```
 
+### Server bilan ishlash
+Server: **[lokma-toyxonalar-server](https://github.com/azimjon-95/lokma-toyxonalar-server)** (`/api/owner-app`, shartnoma — serverdagi `docs/OWNER_APP_API.md`).
+
+```bash
+cp .env.example .env            # EXPO_PUBLIC_API_URL=https://api.lokma.uz
+npx expo start --clear          # o'zgaruvchi o'zgargach keshni tozalang (Metro eski qiymatni eslab qoladi)
+```
+- Kirish: telefon + parol (egasi akkauntini administrator yaratadi: `PUT /api/admin/venues/:id/account`, xodimni egasi ilovadan qo'shadi).
+- Egasi va xodim bir telefonda bo'lsa — rol tanlash ekrani; bitta rol bo'lsa to'g'ridan-to'g'ri kiradi.
+- **Xodim pulni ko'rmaydi:** server pul maydonlarini javobdan olib tashlaydi; ilova ham Moliya, to'lov va menyu yozishni yashiradi.
+- 401 (parol almashgan, hisob o'chirilgan, to'yxona bloklangan) — ilova avtomatik chiqadi.
+- **Rasmlar (Cloudinary):** server kalitlari `CLOUDINARY_*` bilan sozlanadi (ilovada kalit yo'q). Rasm qurilmada ≤1600 px ga siqiladi va
+  server imzolagan chipta bilan to'g'ridan-to'g'ri Cloudinary'ga yuklanadi; so'ng `public_id` serverga ro'yxatdan o'tadi.
+  Joylari: Boshqa → To'yxona rasmlari, taom va menyu rasmi, yangi to'yxona arizasi.
+- Vercel (web): `EXPO_PUBLIC_API_URL` ni Environment Variables'ga qo'shing, serverda `CORS_ORIGINS` ga domenni yozing, so'ng Redeploy.
+
 ### Demo rejim
-`EXPO_PUBLIC_API_URL` berilmasa ilova demo rejimda ishlaydi:
+`EXPO_PUBLIC_API_URL` berilmasa ilova demo rejimda ishlaydi (server qoidalarini xotirada taqlid qiladi):
 - istalgan telefon raqam (9 raqam) va kamida 4 belgili parol;
 - keyin rol tanlanadi (To'yxona egasi / Xodim);
-- demo ma'lumotlar bugungi sanaga nisbatan yaratiladi.
+- demo ma'lumotlar bugungi sanaga nisbatan yaratiladi, ilova yopilganda yo'qoladi.
 
 ## Ekranlar (dizayn bo'yicha)
 
@@ -54,7 +70,7 @@ src/
 
 - **Auth guard:** `Stack.Protected` — tizimga kirmagan foydalanuvchi ichki sahifalarga deep-link orqali ham kira olmaydi; Moliya va Menyu qo'shish faqat `owner` uchun.
 - **Sessiya:** token Keychain/Keystore'da (`AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`) saqlanadi, ilova qayta ochilganda tiklanadi.
-- **Backend ulash:** `EXPO_PUBLIC_API_URL` ni o'rnating va `src/services/api.ts` dagi endpointlarni serverga moslang. Bronlar/to'lovlar hozircha `DataContext` da (xotirada) — keyingi bosqichda shu context API chaqiruvlariga (masalan, TanStack Query) o'tkaziladi.
+- **Ma'lumot qatlami:** ekranlar faqat `backend` (`src/services/api.ts`) bilan ishlaydi: `serverBackend` (haqiqiy server) yoki `demoBackend`. Server javoblari `services/mappers.ts` da ilova turlariga o'giriladi; keshlash va yangilash — TanStack Query (`DataContext`).
 
 ## Store tayyorgarligi
 

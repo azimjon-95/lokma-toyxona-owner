@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Screen } from '@/src/components/ui/Screen';
@@ -7,14 +7,17 @@ import { Card } from '@/src/components/ui/Card';
 import { Button } from '@/src/components/ui/Button';
 import { Tabs } from '@/src/components/ui/Tabs';
 import { StatusBadge } from '@/src/components/ui/Badge';
+import { Sheet, SheetOption } from '@/src/components/ui/Sheet';
 import { EmptyState, IconCircle, PageHeader } from '@/src/components/ui/Misc';
 import { FoodThumb } from '@/src/components/FoodThumb';
 import { Colors, HIT_SLOP, Radius, Spacing } from '@/src/theme';
-import { useData } from '@/src/context/DataContext';
+import { errorMessage, useBooking, useData } from '@/src/context/DataContext';
 import { useIsOwner } from '@/src/context/AuthContext';
 import type { Booking, BookingStatus } from '@/src/types';
 import {
   EVENT_LABEL,
+  PAY_KIND_LABEL,
+  PAY_METHOD_LABEL,
   STATUS_LABEL,
   formatDateShort,
   formatDateTime,
@@ -24,15 +27,26 @@ import {
   pluralGuests,
 } from '@/src/utils/format';
 import { callPhone, openTelegramByPhone } from '@/src/utils/linking';
+import { confirm, notify } from '@/src/utils/dialog';
 
 type Tab = 'info' | 'menu' | 'payments' | 'staff';
 
+/** Lokma ilovasi bronlari "Yangi"/"Zakalat kutilmoqda"ga qaytmaydi (server qoidasi) */
+const statusOptions = (b: Booking): BookingStatus[] =>
+  (b.source === 'app' ? ['confirmed', 'completed', 'cancelled'] : ['pending', 'deposit', 'confirmed', 'completed', 'cancelled']).filter((s) => s !== b.status) as BookingStatus[];
+
 export default function BookingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { getBooking, getMenu, paidFor, transactions, staff, setStatus } = useData();
+  const { getBooking, getMenu, staff, setStatus, assignStaff } = useData();
+  const { booking: fresh } = useBooking(id);
   const isOwner = useIsOwner();
   const [tab, setTab] = useState<Tab>('info');
-  const booking = getBooking(id);
+  const [statusSheet, setStatusSheet] = useState(false);
+  const [staffSheet, setStaffSheet] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const booking = fresh ?? getBooking(id);
 
   if (!booking) {
     return (
@@ -45,30 +59,42 @@ export default function BookingDetailScreen() {
 
   const b = booking;
   const menu = getMenu(b.menuId);
-  const paid = paidFor(b.id);
-  const remaining = Math.max(0, b.totalAmount - paid);
+  const menuName = menu?.name ?? b.menuName;
+  const paid = b.paidAmount;
+  const remaining = b.balance;
   const paidPct = b.totalAmount > 0 ? Math.min(100, Math.round((paid / b.totalAmount) * 100)) : 0;
   const depositPct = b.totalAmount > 0 ? Math.min(100, Math.round((b.depositAmount / b.totalAmount) * 100)) : 0;
-  const payments = transactions.filter((t) => t.bookingId === b.id);
   const assigned = staff.filter((s) => b.staffIds.includes(s.id));
   const closed = b.status === 'cancelled' || b.status === 'completed';
+  const waitingPayment = b.source === 'app' && b.status === 'pending' && b.holdUntil;
 
-  const changeStatus = () => {
-    const options: BookingStatus[] = (['confirmed', 'completed', 'cancelled'] as BookingStatus[]).filter(
-      (s) => s !== b.status
-    );
-    Alert.alert('Holatni o\'zgartirish', `Hozirgi holat: ${STATUS_LABEL[b.status]}`, [
-      ...options.map((s) => ({
-        text: STATUS_LABEL[s],
-        style: s === 'cancelled' ? ('destructive' as const) : ('default' as const),
-        onPress: () => setStatus(b.id, s),
-      })),
-      { text: 'Yopish', style: 'cancel' as const },
-    ]);
+  const applyStatus = async (s: BookingStatus) => {
+    setStatusSheet(false);
+    if (s === 'cancelled' && !(await confirm('Bronni bekor qilish', `${b.clientName} broni bekor qilinadi va seans bo'shaydi.`, { ok: 'Bekor qilish', destructive: true }))) return;
+    setBusy(true);
+    try {
+      await setStatus(b.id, s);
+    } catch (e) {
+      notify("Holat o'zgarmadi", errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const shareReceipt = () =>
-    Share.share({ message: receiptText(b, menu?.name, paid, remaining) }).catch(() => {});
+  const openStaffSheet = () => { setPicked(b.staffIds); setStaffSheet(true); };
+  const saveStaff = async () => {
+    setStaffSheet(false);
+    setBusy(true);
+    try {
+      await assignStaff(b.id, picked);
+    } catch (e) {
+      notify('Xodimlar saqlanmadi', errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const shareReceipt = () => Share.share({ message: receiptText(b, menuName, paid, remaining) }).catch(() => {});
 
   return (
     <Screen
@@ -86,24 +112,14 @@ export default function BookingDetailScreen() {
                 onPress={() => router.push({ pathname: '/booking/payment', params: { id: b.id } })}
               />
             ) : null}
-            <Button
-              title="Qo'ng'iroq"
-              icon="call"
-              variant="info"
-              style={styles.flex}
-              onPress={() => callPhone(b.clientPhone)}
-            />
+            <Button title="Qo'ng'iroq" icon="call" variant="info" style={styles.flex} onPress={() => callPhone(b.clientPhone)} />
           </View>
           <View style={styles.quick}>
             <QuickAction icon="paper-plane-outline" label="Telegram" onPress={() => openTelegramByPhone(b.clientPhone)} />
             {isOwner && !closed ? (
-              <QuickAction
-                icon="create-outline"
-                label="Tahrirlash"
-                onPress={() => router.push({ pathname: '/booking/new', params: { id: b.id } })}
-              />
+              <QuickAction icon="create-outline" label="Tahrirlash" onPress={() => router.push({ pathname: '/booking/new', params: { id: b.id } })} />
             ) : null}
-            <QuickAction icon="receipt-outline" label="Chek" onPress={shareReceipt} />
+            {isOwner ? <QuickAction icon="receipt-outline" label="Chek" onPress={shareReceipt} /> : null}
           </View>
         </View>
       }
@@ -112,8 +128,8 @@ export default function BookingDetailScreen() {
         title="Bron tafsilotlari"
         back
         right={
-          isOwner ? (
-            <Pressable onPress={changeStatus} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Holatni o'zgartirish">
+          isOwner && statusOptions(b).length > 0 && b.status !== 'cancelled' ? (
+            <Pressable onPress={() => setStatusSheet(true)} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Holatni o'zgartirish" disabled={busy}>
               <Ionicons name="ellipsis-horizontal-circle-outline" size={26} color={Colors.text} />
             </Pressable>
           ) : undefined
@@ -134,8 +150,19 @@ export default function BookingDetailScreen() {
               <Text style={styles.sub}>{b.clientName}</Text>
             </View>
           </View>
-          <StatusBadge status={b.status} />
+          <View style={{ alignItems: 'flex-end', gap: 6 }}>
+            <StatusBadge status={b.status} />
+            {b.source === 'app' ? (
+              <View style={styles.source} accessibilityLabel="Lokma ilovasi orqali">
+                <Ionicons name="phone-portrait-outline" size={11} color={Colors.info} />
+                <Text style={styles.sourceText}>Lokma{b.number ? ` · ${b.number}` : ''}</Text>
+              </View>
+            ) : null}
+          </View>
         </View>
+        {waitingPayment ? (
+          <Text style={styles.hold}>Mijoz zakalat to&apos;lashini kutmoqda: seans {formatHoldTime(b.holdUntil!)} gacha ushlab turiladi.</Text>
+        ) : null}
       </Card>
 
       {isOwner ? (
@@ -187,17 +214,26 @@ export default function BookingDetailScreen() {
           <Card style={styles.mt}>
             <Text style={styles.cardTitle}>Tadbir</Text>
             <InfoRow icon="business-outline" label="Zal" value={b.hallName ?? '—'} />
+            <InfoRow icon="calendar-outline" label="Seans" value={b.sessionLabel} />
             <InfoRow icon="time-outline" label="Vaqt" value={`${b.time}${b.endTime ? ` – ${b.endTime}` : ''}`} />
             <InfoRow icon="people-outline" label="Mehmonlar" value={pluralGuests(b.guestCount)} />
             {b.notes ? <InfoRow icon="chatbubble-ellipses-outline" label="Izoh" value={b.notes} /> : null}
           </Card>
-          {menu ? (
+          {b.extras.length > 0 ? (
+            <Card style={styles.mt}>
+              <Text style={styles.cardTitle}>Qo&apos;shimcha xizmatlar</Text>
+              {b.extras.map((x) => (
+                <InfoRow key={x.name} icon={x.type === 'video' ? 'videocam-outline' : 'car-sport-outline'} label={x.type === 'video' ? 'Videochi' : 'Kortej'} value={isOwner ? `${x.name} · ${formatMoney(x.price)}` : x.name} />
+              ))}
+            </Card>
+          ) : null}
+          {menuName ? (
             <Card style={[styles.mt, styles.rowGap]} onPress={() => setTab('menu')}>
-              <FoodThumb size={48} />
+              <FoodThumb size={48} photo={menu?.photo ?? menu?.dishes.find((d) => d.photo)?.photo} />
               <View style={styles.flex}>
                 <Text style={styles.cardTitleInline}>Menyu</Text>
-                <Text style={styles.strong}>{menu.name}</Text>
-                <Text style={styles.sub}>{formatMoney(menu.pricePerPerson)} / 1 kishi</Text>
+                <Text style={styles.strong}>{menuName}</Text>
+                {menu && isOwner ? <Text style={styles.sub}>{formatMoney(menu.pricePerPerson)} / 1 kishi</Text> : null}
               </View>
               <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
             </Card>
@@ -209,27 +245,33 @@ export default function BookingDetailScreen() {
         menu ? (
           <Card>
             <View style={styles.rowGap}>
-              <FoodThumb size={56} />
+              <FoodThumb size={56} photo={menu.photo ?? menu.dishes.find((d) => d.photo)?.photo} />
               <View style={styles.flex}>
                 <Text style={styles.strong}>{menu.name}</Text>
-                <Text style={styles.sub}>{formatMoney(menu.pricePerPerson)} / 1 kishi</Text>
+                {isOwner ? <Text style={styles.sub}>{formatMoney(menu.pricePerPerson)} / 1 kishi</Text> : null}
               </View>
             </View>
             <View style={styles.divider} />
-            {menu.dishes.map((d) => (
-              <View key={d} style={styles.dishRow}>
-                <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
-                <Text style={styles.dish}>{d}</Text>
+            {menu.dishes.map((d, i) => (
+              <View key={d.id} style={styles.dishRow}>
+                <FoodThumb size={28} seed={i} photo={d.photo} />
+                <Text style={styles.dish}>{d.name}</Text>
               </View>
             ))}
-            <View style={styles.divider} />
-            <View style={styles.between}>
-              <Text style={styles.sub}>
-                {pluralGuests(b.guestCount)} × {formatMoney(menu.pricePerPerson)}
-              </Text>
-              <Text style={styles.strong}>{formatMoney(menu.pricePerPerson * b.guestCount)}</Text>
-            </View>
+            {isOwner ? (
+              <>
+                <View style={styles.divider} />
+                <View style={styles.between}>
+                  <Text style={styles.sub}>
+                    {pluralGuests(b.guestCount)} × {formatMoney(b.pricePerGuest || menu.pricePerPerson)}
+                  </Text>
+                  <Text style={styles.strong}>{formatMoney((b.pricePerGuest || menu.pricePerPerson) * b.guestCount)}</Text>
+                </View>
+              </>
+            ) : null}
           </Card>
+        ) : menuName ? (
+          <EmptyState icon="restaurant-outline" title={menuName} hint="Bu menyu paketi endi mavjud emas." />
         ) : (
           <EmptyState icon="restaurant-outline" title="Menyu tanlanmagan" />
         )
@@ -245,28 +287,26 @@ export default function BookingDetailScreen() {
             <Progress value={paidPct} color={Colors.success} />
             <View style={[styles.between, { marginTop: 8 }]}>
               <Text style={styles.moneyLabel}>Qoldiq</Text>
-              <Text style={[styles.strong, { color: remaining > 0 ? Colors.danger : Colors.success }]}>
-                {formatMoney(remaining)}
-              </Text>
+              <Text style={[styles.strong, { color: remaining > 0 ? Colors.danger : Colors.success }]}>{formatMoney(remaining)}</Text>
             </View>
           </Card>
-          {payments.length === 0 ? (
+          {b.payments.length === 0 ? (
             <EmptyState icon="cash-outline" title="Hali to'lov yo'q" />
           ) : (
-            payments.map((p) => (
+            b.payments.map((p) => (
               <Card key={p.id} style={[styles.mt, styles.rowGap]}>
                 <IconCircle
-                  name={p.type === 'deposit' ? 'lock-closed-outline' : 'cash-outline'}
+                  name={p.kind === 'deposit' ? 'lock-closed-outline' : p.kind === 'refund' ? 'return-down-back-outline' : 'cash-outline'}
                   size={38}
-                  color={p.type === 'deposit' ? Colors.warning : Colors.success}
-                  bg={p.type === 'deposit' ? Colors.warningBg : Colors.successBg}
+                  color={p.kind === 'deposit' ? Colors.warning : p.kind === 'refund' ? Colors.danger : Colors.success}
+                  bg={p.kind === 'deposit' ? Colors.warningBg : p.kind === 'refund' ? Colors.dangerBg : Colors.successBg}
                   style={{ borderWidth: 0 }}
                 />
                 <View style={styles.flex}>
-                  <Text style={styles.strong}>{p.title}</Text>
-                  <Text style={styles.sub}>{formatDateTime(p.createdAt)}</Text>
+                  <Text style={styles.strong}>{PAY_KIND_LABEL[p.kind]} · {PAY_METHOD_LABEL[p.method]}</Text>
+                  <Text style={styles.sub}>{formatDateTime(p.at)}{p.note ? ` · ${p.note}` : ''}</Text>
                 </View>
-                <Text style={[styles.strong, { color: Colors.success }]}>+{formatMoney(p.amount)}</Text>
+                <Text style={[styles.strong, { color: p.kind === 'refund' ? Colors.danger : Colors.success }]}>{p.kind === 'refund' ? '−' : '+'}{formatMoney(p.amount)}</Text>
               </Card>
             ))
           )}
@@ -274,40 +314,69 @@ export default function BookingDetailScreen() {
       ) : null}
 
       {tab === 'staff' ? (
-        assigned.length === 0 ? (
-          <EmptyState icon="people-outline" title="Xodimlar biriktirilmagan" />
-        ) : (
-          assigned.map((s) => (
-            <Card key={s.id} style={[styles.rowGap, { marginBottom: Spacing.sm }]}>
-              <IconCircle name="person-outline" size={40} />
-              <View style={styles.flex}>
-                <Text style={styles.strong}>{s.name}</Text>
-                <Text style={styles.sub}>{s.role}</Text>
-              </View>
-              <Pressable
-                onPress={() => callPhone(s.phone)}
-                hitSlop={HIT_SLOP}
-                accessibilityRole="button"
-                accessibilityLabel={`${s.name} ga qo'ng'iroq`}
-              >
-                <Ionicons name="call-outline" size={20} color={Colors.info} />
-              </Pressable>
-            </Card>
-          ))
-        )
+        <>
+          {assigned.length === 0 ? (
+            <EmptyState icon="people-outline" title="Xodimlar biriktirilmagan" />
+          ) : (
+            assigned.map((s) => (
+              <Card key={s.id} style={[styles.rowGap, { marginBottom: Spacing.sm }]}>
+                <IconCircle name="person-outline" size={40} />
+                <View style={styles.flex}>
+                  <Text style={styles.strong}>{s.name}</Text>
+                  <Text style={styles.sub}>{s.position}</Text>
+                </View>
+                <Pressable onPress={() => callPhone(s.phone)} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel={`${s.name} ga qo'ng'iroq`}>
+                  <Ionicons name="call-outline" size={20} color={Colors.info} />
+                </Pressable>
+              </Card>
+            ))
+          )}
+          {isOwner && b.status !== 'cancelled' ? <Button title={assigned.length ? "Xodimlarni o'zgartirish" : 'Xodim biriktirish'} icon="person-add-outline" variant="soft" onPress={openStaffSheet} style={styles.mt} /> : null}
+        </>
       ) : null}
+
+      <Sheet visible={statusSheet} title="Holatni o'zgartirish" subtitle={`Hozirgi holat: ${STATUS_LABEL[b.status]}`} onClose={() => setStatusSheet(false)}>
+        {statusOptions(b).map((s) => (
+          <SheetOption key={s} label={STATUS_LABEL[s]} destructive={s === 'cancelled'} onPress={() => applyStatus(s)} />
+        ))}
+      </Sheet>
+
+      <Sheet
+        visible={staffSheet}
+        title="Xodim biriktirish"
+        subtitle="Shu tadbirda ishlaydigan xodimlarni tanlang"
+        onClose={() => setStaffSheet(false)}
+        footer={<Button title="Saqlash" icon="checkmark" onPress={saveStaff} />}
+      >
+        {staff.filter((s) => s.active).map((s) => (
+          <SheetOption
+            key={s.id}
+            label={s.name}
+            hint={s.position}
+            selected={picked.includes(s.id)}
+            onPress={() => setPicked((p) => (p.includes(s.id) ? p.filter((x) => x !== s.id) : [...p, s.id]))}
+          />
+        ))}
+      </Sheet>
     </Screen>
   );
 }
+
+const formatHoldTime = (iso: string) => {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
 
 function receiptText(b: Booking, menuName: string | undefined, paid: number, remaining: number) {
   return [
     "LOKMA TO'YXONALAR — CHEK",
     '------------------------',
+    b.number ? `Bron: ${b.number}` : null,
     `Mijoz: ${b.clientName}`,
     `Telefon: ${formatPhone(b.clientPhone)}`,
-    `Sana: ${formatDateShort(b.date)}, ${b.time}`,
+    `Sana: ${formatDateShort(b.date)}, ${b.time}${b.endTime ? ` – ${b.endTime}` : ''}`,
     `Tadbir: ${EVENT_LABEL[b.type]} · ${pluralGuests(b.guestCount)}`,
+    b.hallName ? `Zal: ${b.hallName}` : null,
     menuName ? `Menyu: ${menuName}` : null,
     '------------------------',
     `Jami: ${formatMoney(b.totalAmount)}`,
@@ -378,6 +447,9 @@ const styles = StyleSheet.create({
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: Colors.borderStrong, marginVertical: 12 },
   dishRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
   dish: { fontSize: 14, color: Colors.text },
+  source: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.infoBg, borderRadius: Radius.full, paddingHorizontal: 8, paddingVertical: 3 },
+  sourceText: { fontSize: 11, fontWeight: '700', color: Colors.info },
+  hold: { fontSize: 12, color: Colors.warning, marginTop: 10, fontWeight: '600' },
   footer: { gap: 10 },
   actions: { flexDirection: 'row', gap: 10 },
   quick: {

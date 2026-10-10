@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
@@ -9,17 +9,22 @@ import { Tabs } from '@/src/components/ui/Tabs';
 import { StatusBadge } from '@/src/components/ui/Badge';
 import { EmptyState, IconCircle, PageHeader } from '@/src/components/ui/Misc';
 import { Colors, HIT_SLOP, Spacing } from '@/src/theme';
-import { useData } from '@/src/context/DataContext';
+import { useClients } from '@/src/context/DataContext';
 import { callPhone } from '@/src/utils/linking';
-import { digitsOnly, formatDateShort, formatPhone, pluralGuests, todayISO } from '@/src/utils/format';
+import { formatDateShort, formatPhone, pluralGuests, todayISO } from '@/src/utils/format';
 
 type Filter = 'all' | 'new' | 'upcoming';
 
 export default function ClientsScreen() {
-  const { clients } = useData();
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
-  const q = useDeferredValue(query.trim().toLowerCase());
+  // Qidiruv serverda (ism yoki telefon); har harfda so'rov yubormaslik uchun 350 ms kutiladi
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setQ(query.trim()), 350);
+    return () => clearTimeout(t);
+  }, [query]);
+  const { clients, loading, error, refetch } = useClients(q);
 
   const data = useMemo(() => {
     const today = todayISO();
@@ -27,14 +32,8 @@ export default function ClientsScreen() {
     if (filter === 'new') list = list.filter((c) => c.lastBooking.status === 'pending');
     if (filter === 'upcoming')
       list = list.filter((c) => c.lastBooking.date >= today && c.lastBooking.status !== 'cancelled');
-    if (q) {
-      const qd = digitsOnly(q);
-      list = list.filter(
-        (c) => c.name.toLowerCase().includes(q) || (qd.length > 0 && digitsOnly(c.phone).includes(qd))
-      );
-    }
     return list;
-  }, [clients, filter, q]);
+  }, [clients, filter]);
 
   return (
     <Screen>
@@ -66,7 +65,9 @@ export default function ClientsScreen() {
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: Spacing.md }}
-        ListEmptyComponent={<EmptyState icon="people-outline" title="Mijozlar topilmadi" />}
+        refreshing={loading}
+        onRefresh={() => void refetch()}
+        ListEmptyComponent={<EmptyState icon="people-outline" title={error ?? (loading ? 'Yuklanmoqda…' : 'Mijozlar topilmadi')} />}
         renderItem={({ item: c }) => (
           <Card
             style={styles.card}

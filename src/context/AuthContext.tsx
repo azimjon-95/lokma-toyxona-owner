@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { Session, User, UserRole } from '../types';
-import * as api from '../services/api';
+import { IS_DEMO, backend, setAuthToken, setUnauthorizedHandler } from '../services/api';
 import { secureStorage } from '../services/storage';
 
 const SESSION_KEY = 'lokma.session.v1';
@@ -33,7 +33,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [pending, setPending] = useState<PendingLogin | null>(null);
 
-  // Ilova ochilganda saqlangan sessiyani tiklash
+  // HTTP qatlami joriy rol tokenini shu yerdan oladi
+  useEffect(() => {
+    setAuthToken(session?.token ?? null);
+  }, [session?.token]);
+
+  const signOut = useCallback(async () => {
+    await secureStorage.remove(SESSION_KEY);
+    setAuthToken(null);
+    setSession(null);
+    setPending(null);
+    setStatus('signedOut');
+  }, []);
+
+  // Server 401 qaytarsa (muddati tugagan, parol almashgan, hisob o'chirilgan/bloklangan) — chiqib ketamiz
+  useEffect(() => {
+    setUnauthorizedHandler(() => { void signOut(); });
+    return () => setUnauthorizedHandler(null);
+  }, [signOut]);
+
+  // Ilova ochilganda saqlangan sessiyani tiklash va serverda tekshirish
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -43,8 +62,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const s = JSON.parse(raw) as Session;
           if (s?.token && s?.user) {
+            setAuthToken(s.token);
             setSession(s);
             setStatus('signedIn');
+            if (!IS_DEMO) {
+              // Fon rejimida tekshiramiz: yaroqsiz bo'lsa 401 handler chiqarib yuboradi; internet yo'q bo'lsa — ishlayveradi
+              backend.fetchSession(s.token).then((fresh) => {
+                if (!alive) return;
+                setSession(fresh);
+                void secureStorage.set(SESSION_KEY, JSON.stringify(fresh));
+              }).catch(() => {});
+            }
             return;
           }
         } catch {
@@ -58,9 +86,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const finish = useCallback(async (token: string, phone: string, role: UserRole) => {
-    const s = await api.fetchSession(token, phone, role);
+  const finish = useCallback(async (token: string, role: UserRole) => {
+    const s = await backend.fetchSession(token, role);
     await secureStorage.set(SESSION_KEY, JSON.stringify(s));
+    setAuthToken(s.token);
     setSession(s);
     setPending(null);
     setStatus('signedIn');
@@ -68,9 +97,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback(
     async (phone: string, password: string) => {
-      const res = await api.login(phone, password);
+      const res = await backend.login(phone, password);
       if (res.roles.length === 1) {
-        await finish(res.token, phone, res.roles[0]);
+        await finish(res.token, res.roles[0]);
         return;
       }
       setPending({ token: res.token, phone, roles: res.roles });
@@ -82,7 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const chooseRole = useCallback(
     async (role: UserRole) => {
       if (!pending) throw new Error('No pending login');
-      await finish(pending.token, pending.phone, role);
+      await finish(pending.token, role);
     },
     [pending, finish]
   );
@@ -92,15 +121,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setStatus('signedOut');
   }, []);
 
-  const signOut = useCallback(async () => {
-    await secureStorage.remove(SESSION_KEY);
-    setSession(null);
-    setPending(null);
-    setStatus('signedOut');
-  }, []);
-
   const deleteAccount = useCallback(async () => {
-    if (session) await api.deleteAccount(session.token);
+    if (session) await backend.deleteAccount();
     await signOut();
   }, [session, signOut]);
 

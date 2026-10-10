@@ -24,6 +24,12 @@ export function BookingCard({ booking, showAmount = true }: { booking: Booking; 
           <Text style={styles.type}>
             {EVENT_LABEL[b.type]} · {pluralGuests(b.guestCount)}
           </Text>
+          {b.source === 'app' ? (
+            <View style={styles.source}>
+              <Ionicons name="phone-portrait-outline" size={11} color={Colors.info} />
+              <Text style={styles.sourceText}>Lokma ilovasi</Text>
+            </View>
+          ) : null}
         </View>
         <StatusBadge status={b.status} />
       </View>
@@ -51,5 +57,7 @@ const styles = StyleSheet.create({
   bottom: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
   client: { fontSize: 14, fontWeight: '600', color: Colors.text },
   phone: { fontSize: 12, color: Colors.textMuted, marginTop: 1 },
+  source: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginTop: 6, backgroundColor: Colors.infoBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  sourceText: { fontSize: 11, fontWeight: '700', color: Colors.info },
   amount: { fontSize: 13, fontWeight: '700', color: Colors.text },
 });

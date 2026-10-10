@@ -8,7 +8,7 @@ import { IconCircle, PageHeader } from '@/src/components/ui/Misc';
 import { ApplyCard } from '@/src/components/ApplyCard';
 import { Colors, HIT_SLOP, Spacing } from '@/src/theme';
 import { digitsOnly, isValidLocalPhone, toE164 } from '@/src/utils/format';
-import { ApiError, requestPasswordReset, resetPassword } from '@/src/services/api';
+import { ApiError, backend } from '@/src/services/api';
 
 const RESEND_SECONDS = 60;
 
@@ -17,6 +17,8 @@ export default function ForgotPasswordScreen() {
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [step, setStep] = useState<'phone' | 'code'>('phone');
+  /** Faqat server SMS provayderisiz (dev/test) ishlaganda keladi */
+  const [devCode, setDevCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [timer, setTimer] = useState(0);
@@ -35,7 +37,8 @@ export default function ForgotPasswordScreen() {
     setError('');
     setLoading(true);
     try {
-      await requestPasswordReset(toE164(phone));
+      const r = await backend.requestPasswordReset(toE164(phone));
+      setDevCode(r.devCode ?? '');
       setStep('code');
       setTimer(RESEND_SECONDS);
     } catch (e) {
@@ -51,7 +54,7 @@ export default function ForgotPasswordScreen() {
     setError('');
     setLoading(true);
     try {
-      await resetPassword(toE164(phone), code, password);
+      await backend.resetPassword(toE164(phone), code, password);
       Alert.alert('Tayyor', "Parol yangilandi. Endi yangi parol bilan kiring.", [
         { text: 'OK', onPress: () => router.back() },
       ]);
@@ -95,6 +98,7 @@ export default function ForgotPasswordScreen() {
             onChangeText={(t) => setCode(digitsOnly(t))}
             autoFocus
           />
+          {devCode ? <Text style={styles.devHint}>Sinov rejimi: SMS yuborilmadi, kod {devCode}</Text> : null}
           <Input
             label="Yangi parol"
             icon="lock-closed-outline"
@@ -133,6 +137,7 @@ export default function ForgotPasswordScreen() {
 }
 
 const styles = StyleSheet.create({
+  devHint: { fontSize: 12, color: Colors.warning, marginTop: -6, marginBottom: Spacing.sm },
   hero: { alignItems: 'center', marginBottom: Spacing.lg },
   title: { fontSize: 24, fontWeight: '700', color: Colors.text, marginTop: Spacing.md },
   subtitle: {

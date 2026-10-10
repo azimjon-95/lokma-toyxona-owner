@@ -49,7 +49,11 @@ function RootNavigator() {
         <Stack.Screen name="staff" />
         <Stack.Protected guard={isOwner}>
           <Stack.Screen name="finance" />
+          <Stack.Screen name="expense" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
           <Stack.Screen name="menu/new" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="employee/index" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="venue-photos" />
+          <Stack.Screen name="venue-info" />
         </Stack.Protected>
       </Stack.Protected>
 

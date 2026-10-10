@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { Screen } from '@/src/components/ui/Screen';
@@ -10,12 +10,13 @@ import { IconCircle } from '@/src/components/ui/Misc';
 import { HallBanner } from '@/src/components/HallBanner';
 import { Colors, HIT_SLOP, Radius, Spacing } from '@/src/theme';
 import { useAuth } from '@/src/context/AuthContext';
+import { DataBanner, SubscriptionBanner } from '@/src/components/DataBanner';
 import { useData, useFinance } from '@/src/context/DataContext';
 import { EVENT_LABEL, formatDateLong, formatMoneyCompact, pluralGuests, todayISO } from '@/src/utils/format';
 
 export default function HomeScreen() {
   const { user } = useAuth();
-  const { bookings } = useData();
+  const { bookings, refresh, refreshing } = useData();
   const fin = useFinance();
   const isOwner = user?.role === 'owner';
 
@@ -38,7 +39,7 @@ export default function HomeScreen() {
   const growth = fin.todayGrowthPercent;
 
   return (
-    <Screen scroll>
+    <Screen scroll refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={Colors.primary} />}>
       <View style={styles.header}>
         <Logo size="sm" layout="row" />
         <View style={styles.headerRight}>
@@ -60,6 +61,9 @@ export default function HomeScreen() {
           </Pressable>
         </View>
       </View>
+
+      <SubscriptionBanner />
+      <DataBanner />
 
       <HallBanner style={styles.banner}>
         <View style={styles.bannerBody}>

@@ -7,10 +7,12 @@ import { Screen } from '@/src/components/ui/Screen';
 import { Card } from '@/src/components/ui/Card';
 import { Tabs } from '@/src/components/ui/Tabs';
 import { EmptyState, IconCircle, PageHeader, SectionTitle } from '@/src/components/ui/Misc';
+import { PageHeaderAction } from '@/src/components/ui/PageHeaderAction';
 import { Colors, Radius, Spacing } from '@/src/theme';
-import { useData, useFinance } from '@/src/context/DataContext';
+import { errorMessage, useData, useFinance, useOperations } from '@/src/context/DataContext';
 import type { TransactionType } from '@/src/types';
-import { formatDateTime, formatMoney, formatNumber, formatNumberCompact } from '@/src/utils/format';
+import { PAY_METHOD_LABEL, formatDateTime, formatMoney, formatNumber, formatNumberCompact } from '@/src/utils/format';
+import { confirm, notify } from '@/src/utils/dialog';
 
 type Tab = 'all' | 'income' | 'expense';
 
@@ -18,20 +20,33 @@ const TX_STYLE: Record<TransactionType, { icon: React.ComponentProps<typeof Ioni
   income: { icon: 'cash-outline', fg: Colors.success, bg: Colors.successBg },
   deposit: { icon: 'lock-closed-outline', fg: Colors.warning, bg: Colors.warningBg },
   expense: { icon: 'cart-outline', fg: Colors.danger, bg: Colors.dangerBg },
+  refund: { icon: 'return-down-back-outline', fg: Colors.danger, bg: Colors.dangerBg },
 };
 
 export default function FinanceScreen() {
   const [tab, setTab] = useState<Tab>('all');
-  const { transactions } = useData();
+  const { deleteTransaction } = useData();
   const f = useFinance();
+  const { operations, loading, error, refetch } = useOperations();
 
-  const list = transactions.filter((t) =>
-    tab === 'all' ? true : tab === 'expense' ? t.type === 'expense' : t.type !== 'expense'
+  // Qaytarilgan to'lovlar ham "Xarajat" ro'yxatida (daromadni kamaytiradi)
+  const list = operations.filter((t) =>
+    tab === 'all' ? true : tab === 'expense' ? t.type === 'expense' || t.type === 'refund' : t.type === 'income' || t.type === 'deposit'
   );
+
+  const removeTx = async (id: string, title: string) => {
+    if (!(await confirm("Yozuvni o'chirish", `"${title}" o'chiriladi.`, { ok: "O'chirish", destructive: true }))) return;
+    try {
+      await deleteTransaction(id);
+      void refetch();
+    } catch (e) {
+      notify("O'chirilmadi", errorMessage(e));
+    }
+  };
 
   return (
     <Screen scroll edges={['top', 'left', 'right', 'bottom']}>
-      <PageHeader title="Moliya" back />
+      <PageHeader title="Moliya" back right={<PageHeaderAction icon="add-circle-outline" label="Xarajat qo'shish" onPress={() => router.push('/expense')} />} />
       <Tabs
         items={[
           { key: 'all', label: 'Barchasi' },
@@ -63,26 +78,33 @@ export default function FinanceScreen() {
       </View>
 
       <SectionTitle>So&apos;nggi operatsiyalar</SectionTitle>
-      {list.length === 0 ? (
-        <EmptyState icon="receipt-outline" title="Operatsiyalar yo'q" />
+      {error ? (
+        <EmptyState icon="cloud-offline-outline" title={error} />
+      ) : list.length === 0 ? (
+        <EmptyState icon="receipt-outline" title={loading ? 'Yuklanmoqda…' : "Operatsiyalar yo'q"} />
       ) : (
         list.map((t) => {
           const s = TX_STYLE[t.type];
-          const sign = t.type === 'expense' ? '-' : '+';
+          const out = t.type === 'expense' || t.type === 'refund';
+          const sign = out ? '-' : '+';
           return (
             <Card
               key={t.id}
               style={styles.tx}
-              onPress={t.bookingId ? () => router.push({ pathname: '/booking/[id]', params: { id: t.bookingId! } }) : undefined}
+              onPress={
+                t.bookingId ? () => router.push({ pathname: '/booking/[id]', params: { id: t.bookingId! } }) : t.deletable ? () => void removeTx(t.id, t.title) : undefined
+              }
             >
               <IconCircle name={s.icon} size={40} color={s.fg} bg={s.bg} style={{ borderWidth: 0 }} />
               <View style={styles.flex}>
                 <Text style={styles.txTitle} numberOfLines={1}>
                   {t.title}
                 </Text>
-                <Text style={styles.txDate}>{formatDateTime(t.createdAt)}</Text>
+                <Text style={styles.txDate} numberOfLines={1}>
+                  {formatDateTime(t.createdAt)} · {PAY_METHOD_LABEL[t.method]}{t.subtitle ? ` · ${t.subtitle}` : ''}
+                </Text>
               </View>
-              <Text style={[styles.txAmount, { color: t.type === 'expense' ? Colors.danger : Colors.text }]}>
+              <Text style={[styles.txAmount, { color: out ? Colors.danger : Colors.text }]}>
                 {sign}
                 {formatNumber(t.amount)} so&apos;m
               </Text>

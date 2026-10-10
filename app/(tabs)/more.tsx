@@ -1,15 +1,19 @@
-import React from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, type Href } from 'expo-router';
 import { Screen } from '@/src/components/ui/Screen';
 import { Card } from '@/src/components/ui/Card';
 import { IconCircle, PageHeader } from '@/src/components/ui/Misc';
+import { Sheet, SheetOption } from '@/src/components/ui/Sheet';
+import { SubscriptionBanner } from '@/src/components/DataBanner';
 import { Colors, Radius, Spacing } from '@/src/theme';
 import { useAuth } from '@/src/context/AuthContext';
+import { errorMessage } from '@/src/context/DataContext';
 import { APP_CONFIG } from '@/src/config';
 import { formatPhone } from '@/src/utils/format';
 import { callPhone, openTelegramUser, openUrl } from '@/src/utils/linking';
+import { confirm, notify } from '@/src/utils/dialog';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -27,43 +31,33 @@ export default function MoreScreen() {
 
   const go = (href: Href) => () => router.push(href);
 
-  const support = () =>
-    Alert.alert("Yordam va qo'llab-quvvatlash", 'Biz bilan qanday bog\'lanasiz?', [
-      { text: "Qo'ng'iroq", onPress: () => callPhone(APP_CONFIG.supportPhone) },
-      { text: 'Telegram', onPress: () => openTelegramUser(APP_CONFIG.supportTelegram) },
-      { text: 'Bekor qilish', style: 'cancel' },
-    ]);
+  const [supportSheet, setSupportSheet] = useState(false);
+  const support = () => setSupportSheet(true);
 
-  const logout = () =>
-    Alert.alert('Chiqish', 'Hisobdan chiqmoqchimisiz?', [
-      { text: 'Bekor qilish', style: 'cancel' },
-      { text: 'Chiqish', style: 'destructive', onPress: () => signOut() },
-    ]);
+  const logout = async () => {
+    if (await confirm('Chiqish', 'Hisobdan chiqmoqchimisiz?', { ok: 'Chiqish', destructive: true })) await signOut();
+  };
 
   // App Store 5.1.1(v): hisobni ilova ichidan o'chirish imkoniyati majburiy
-  const removeAccount = () =>
-    Alert.alert(
+  const removeAccount = async () => {
+    const ok = await confirm(
       "Hisobni o'chirish",
-      "Hisobingiz va unga bog'liq shaxsiy ma'lumotlar butunlay o'chiriladi. Bu amalni qaytarib bo'lmaydi.",
-      [
-        { text: 'Bekor qilish', style: 'cancel' },
-        {
-          text: "O'chirish",
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteAccount();
-            } catch {
-              Alert.alert('Xatolik', "Hisobni o'chirib bo'lmadi. Keyinroq qayta urinib ko'ring.");
-            }
-          },
-        },
-      ]
+      "Ilovaga kirish hisobingiz o'chiriladi va u orqali kira olmaysiz. To'yxona ma'lumotlari (bronlar, moliya) saqlanib qoladi; qayta yoqish uchun administrator bilan bog'laning. Bu amalni qaytarib bo'lmaydi.",
+      { ok: "O'chirish", destructive: true }
     );
+    if (!ok) return;
+    try {
+      await deleteAccount();
+    } catch (e) {
+      notify('Xatolik', errorMessage(e, "Hisobni o'chirib bo'lmadi. Keyinroq qayta urinib ko'ring."));
+    }
+  };
 
   const items: Item[] = [
     { icon: 'wallet-outline', title: 'Moliya', onPress: go('/finance'), ownerOnly: true },
     { icon: 'people-circle-outline', title: 'Xodimlar', onPress: go('/staff') },
+    { icon: 'images-outline', title: "To'yxona rasmlari", onPress: go('/venue-photos'), ownerOnly: true },
+    { icon: 'storefront-outline', title: "To'yxona ma'lumotlari", onPress: go('/venue-info'), ownerOnly: true },
     { icon: 'business-outline', title: "Yangi to'yxona arizasi", onPress: go('/venue-apply'), ownerOnly: true },
     { icon: 'help-buoy-outline', title: "Yordam va qo'llab-quvvatlash", onPress: support },
     { icon: 'shield-checkmark-outline', title: 'Maxfiylik siyosati', onPress: () => openUrl(APP_CONFIG.privacyPolicyUrl) },
@@ -73,6 +67,7 @@ export default function MoreScreen() {
   return (
     <Screen scroll>
       <PageHeader title="Boshqa" />
+      <SubscriptionBanner />
       <Card style={styles.profile}>
         <IconCircle name="person" size={56} />
         <View style={styles.flex}>
@@ -113,6 +108,11 @@ export default function MoreScreen() {
       </Card>
 
       <Text style={styles.version}>Lokma To&apos;yxonalar · v{APP_CONFIG.version}</Text>
+
+      <Sheet visible={supportSheet} title="Yordam va qo'llab-quvvatlash" subtitle="Biz bilan qanday bog'lanasiz?" onClose={() => setSupportSheet(false)}>
+        <SheetOption label="Qo'ng'iroq" onPress={() => { setSupportSheet(false); callPhone(APP_CONFIG.supportPhone); }} />
+        <SheetOption label="Telegram" onPress={() => { setSupportSheet(false); openTelegramUser(APP_CONFIG.supportTelegram); }} />
+      </Sheet>
     </Screen>
   );
 }

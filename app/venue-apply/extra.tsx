@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { Screen } from '@/src/components/ui/Screen';
@@ -12,12 +11,14 @@ import { PageHeader, StepIndicator } from '@/src/components/ui/Misc';
 import { Colors, HIT_SLOP, Radius, Spacing } from '@/src/theme';
 import { useVenueApply } from '@/src/context/VenueApplyContext';
 import { formatAmountInput, parseAmount, toE164 } from '@/src/utils/format';
-import { ApiError, submitVenueApplication } from '@/src/services/api';
+import { ApiError, backend } from '@/src/services/api';
+import { pickImages, uploadImage } from '@/src/services/upload';
 
 const MAX_PHOTOS = 6;
 
 export default function VenueApplyExtra() {
-  const { draft, update } = useVenueApply();
+  const { draft, update, images, setImages } = useVenueApply();
+  const [progress, setProgress] = useState('');
   const [priceFrom, setPriceFrom] = useState(draft.priceFrom ? formatAmountInput(String(draft.priceFrom)) : '');
   const [priceTo, setPriceTo] = useState(draft.priceTo ? formatAmountInput(String(draft.priceTo)) : '');
   const [loading, setLoading] = useState(false);
@@ -26,18 +27,11 @@ export default function VenueApplyExtra() {
   // Android 13+ — tizim Photo Picker (ruxsat so'ralmaydi, Google Play siyosatiga mos);
   // iOS — PHPicker (to'liq galereya ruxsati shart emas).
   const pickPhotos = async () => {
-    const left = MAX_PHOTOS - draft.photos.length;
+    const left = MAX_PHOTOS - images.length;
     if (left <= 0) return;
     try {
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsMultipleSelection: true,
-        selectionLimit: left,
-        quality: 0.7,
-      });
-      if (!res.canceled) {
-        update({ photos: [...draft.photos, ...res.assets.map((a) => a.uri)].slice(0, MAX_PHOTOS) });
-      }
+      const picked = await pickImages(left);
+      if (picked.length) setImages((prev) => [...prev, ...picked].slice(0, MAX_PHOTOS));
     } catch {
       Alert.alert('Xatolik', "Galereyani ochib bo'lmadi");
     }
@@ -53,12 +47,20 @@ export default function VenueApplyExtra() {
     setError('');
     setLoading(true);
     try {
-      await submitVenueApplication({ ...draft, phone: toE164(draft.phone), priceFrom: from, priceTo: to });
+      // 1) Rasmlar Cloudinary'ga yuklanadi (har biri alohida progress bilan), 2) public_id'lar bilan ariza yuboriladi
+      const ids: string[] = [];
+      for (let i = 0; i < images.length; i++) {
+        setProgress(`Rasm yuklanmoqda ${i + 1}/${images.length}`);
+        ids.push(await uploadImage('application', images[i]));
+      }
+      setProgress('Ariza yuborilmoqda');
+      await backend.submitVenueApplication({ ...draft, phone: toE164(draft.phone), photos: ids, priceFrom: from, priceTo: to });
       router.replace('/venue-apply/done');
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ariza yuborilmadi. Qayta urinib ko'ring.");
     } finally {
       setLoading(false);
+      setProgress('');
     }
   };
 
@@ -67,20 +69,20 @@ export default function VenueApplyExtra() {
       scroll
       keyboard
       edges={['top', 'left', 'right', 'bottom']}
-      footer={<Button title="Ariza yuborish" icon="paper-plane" onPress={submit} loading={loading} />}
+      footer={<Button title={progress || 'Ariza yuborish'} icon="paper-plane" onPress={submit} loading={loading} />}
     >
       <PageHeader title="Ariza qoldirish" subtitle="3. Qo'shimcha ma'lumot" back />
       <StepIndicator step={3} />
       <Card>
         <Text style={styles.label}>Foto (galereya)</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photos}>
-          {draft.photos.map((uri) => (
+          {images.map(({ uri }) => (
             <View key={uri}>
               <Image source={{ uri }} style={styles.photo} contentFit="cover" transition={150} />
               <Pressable
                 style={styles.remove}
                 hitSlop={HIT_SLOP}
-                onPress={() => update({ photos: draft.photos.filter((p) => p !== uri) })}
+                onPress={() => setImages((prev) => prev.filter((p) => p.uri !== uri))}
                 accessibilityRole="button"
                 accessibilityLabel="Rasmni o'chirish"
               >
@@ -88,7 +90,7 @@ export default function VenueApplyExtra() {
               </Pressable>
             </View>
           ))}
-          {draft.photos.length < MAX_PHOTOS ? (
+          {images.length < MAX_PHOTOS ? (
             <Pressable onPress={pickPhotos} style={styles.add} accessibilityRole="button" accessibilityLabel="Rasm qo'shish">
               <Ionicons name="add" size={26} color={Colors.primary} />
               <Text style={styles.addText}>Qo&apos;shish</Text>
